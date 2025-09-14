@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Log Aggregator Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin:0; padding:0; }
+        header { background-color: #007acc; color: white; padding: 1rem; text-align: center; }
+        main { padding: 1rem; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { border: 1px solid #ccc; padding: 0.5rem; text-align: left; }
+        th { background-color: #007acc; color: white; }
+        .stats { display: flex; gap: 1rem; margin-top: 1rem; }
+        .card { flex: 1; padding: 1rem; background-color: white; border-radius: 8px; box-shadow: 0 0 5px rgba(0,0,0,0.2); }
+        .card h3 { margin-top: 0; }
+        .filters { display: flex; gap: 1rem; margin-top: 1rem; }
+        .filters select { padding: 0.5rem; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Log Aggregator Dashboard</h1>
+    </header>
+    <main>
+        <div class="stats">
+            <div class="card">
+                <h3>Logs by Level</h3>
+                <pre id="by-level">Loading...</pre>
+            </div>
+            <div class="card">
+                <h3>Logs by Service</h3>
+                <pre id="by-service">Loading...</pre>
+            </div>
+        </div>
+
+        <div class="filters">
+            <label>
+                Service:
+                <select id="service-filter">
+                    <option value="">All</option>
+                    <option value="auth">Auth</option>
+                    <option value="payments">Payments</option>
+                    <option value="orders">Orders</option>
+                    <option value="inventory">Inventory</option>
+                    <option value="shipping">Shipping</option>
+                </select>
+            </label>
+            <label>
+                Level:
+                <select id="level-filter">
+                    <option value="">All</option>
+                    <option value="INFO">INFO</option>
+                    <option value="WARN">WARN</option>
+                    <option value="ERROR">ERROR</option>
+                </select>
+            </label>
+        </div>
+
+        <h2>Recent Logs</h2>
+        <table id="logs-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Service</th>
+                    <th>Level</th>
+                    <th>Message</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </main>
+
+    <script>
+        const logsTableBody = document.querySelector("#logs-table tbody");
+        const byLevel = document.getElementById("by-level");
+        const byService = document.getElementById("by-service");
+        const serviceFilter = document.getElementById("service-filter");
+        const levelFilter = document.getElementById("level-filter");
+
+        let allLogs = [];
+
+        async function fetchStats() {
+            try {
+                const res = await fetch("/logs/stats");
+                const data = await res.json();
+                byLevel.textContent = JSON.stringify(data.by_level, null, 2);
+                byService.textContent = JSON.stringify(data.by_service, null, 2);
+            } catch (err) {
+                console.error("Error fetching stats:", err);
+            }
+        }
+
+        async function fetchLogs() {
+            try {
+                const res = await fetch("/logs");
+                allLogs = await res.json();
+                renderLogs();
+            } catch (err) {
+                console.error("Error fetching logs:", err);
+            }
+        }
+
+        function renderLogs() {
+            const serviceVal = serviceFilter.value;
+            const levelVal = levelFilter.value;
+
+            const filteredLogs = allLogs.filter(log => 
+                (serviceVal === "" || log.service === serviceVal) &&
+                (levelVal === "" || log.level === levelVal)
+            );
+
+            logsTableBody.innerHTML = "";
+            filteredLogs.forEach(log => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${log.timestamp}</td>
+                    <td>${log.service}</td>
+                    <td>${log.level}</td>
+                    <td>${log.message}</td>
+                `;
+                logsTableBody.appendChild(row);
+            });
+        }
+
+        serviceFilter.addEventListener("change", renderLogs);
+        levelFilter.addEventListener("change", renderLogs);
+
+        const eventSource = new EventSource("/logs/stream");
+        eventSource.onmessage = (event) => {
+            const log = JSON.parse(event.data);
+            allLogs.unshift(log); // newest on top
+            renderLogs();
+            fetchStats();
+        };
+
+        // Initial load
+        fetchStats();
+        fetchLogs();
+        setInterval(fetchStats, 10000);
+    </script>
+</body>
+</html>
