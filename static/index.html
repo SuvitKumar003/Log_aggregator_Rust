@@ -16,6 +16,16 @@
         .card h3 { margin-top: 0; }
         .filters { display: flex; gap: 1rem; margin-top: 1rem; }
         .filters select { padding: 0.5rem; }
+
+        /* Log level colors */
+        .log-INFO { color: green; }
+        .log-WARN { color: orange; }
+        .log-ERROR { color: red; }
+        .log-CRITICAL { 
+            background-color: #ffcccc; 
+            font-weight: bold; 
+            color: darkred; 
+        }
     </style>
 </head>
 <body>
@@ -53,6 +63,7 @@
                     <option value="INFO">INFO</option>
                     <option value="WARN">WARN</option>
                     <option value="ERROR">ERROR</option>
+                    <option value="CRITICAL">CRITICAL</option>
                 </select>
             </label>
         </div>
@@ -84,7 +95,12 @@
             try {
                 const res = await fetch("/logs/stats");
                 const data = await res.json();
-                byLevel.textContent = JSON.stringify(data.by_level, null, 2);
+
+                // Include CRITICAL count
+                const criticalCount = allLogs.filter(l => l.message.includes("CRITICAL")).length;
+                const updatedByLevel = { ...data.by_level, CRITICAL: criticalCount };
+
+                byLevel.textContent = JSON.stringify(updatedByLevel, null, 2);
                 byService.textContent = JSON.stringify(data.by_service, null, 2);
             } catch (err) {
                 console.error("Error fetching stats:", err);
@@ -95,6 +111,7 @@
             try {
                 const res = await fetch("/logs");
                 allLogs = await res.json();
+                allLogs.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
                 renderLogs();
             } catch (err) {
                 console.error("Error fetching logs:", err);
@@ -107,12 +124,16 @@
 
             const filteredLogs = allLogs.filter(log => 
                 (serviceVal === "" || log.service === serviceVal) &&
-                (levelVal === "" || log.level === levelVal)
+                (levelVal === "" || (levelVal === "CRITICAL" ? log.message.includes("CRITICAL") : log.level === levelVal))
             );
 
             logsTableBody.innerHTML = "";
             filteredLogs.forEach(log => {
                 const row = document.createElement("tr");
+
+                // Assign class based on level
+                row.className = log.message.includes("CRITICAL") ? "log-CRITICAL" : `log-${log.level}`;
+                
                 row.innerHTML = `
                     <td>${log.timestamp}</td>
                     <td>${log.service}</td>
@@ -130,8 +151,24 @@
         eventSource.onmessage = (event) => {
             const log = JSON.parse(event.data);
             allLogs.unshift(log); // newest on top
+
+            // Keep only last 500 logs
+            if(allLogs.length > 500) allLogs.pop();
+
             renderLogs();
             fetchStats();
+
+            // Flash effect for new critical logs
+            if (log.message.includes("CRITICAL")) {
+                const firstRow = logsTableBody.querySelector("tr");
+                if (firstRow) {
+                    firstRow.style.transition = "background-color 0.5s";
+                    firstRow.style.backgroundColor = "#ff6666";
+                    setTimeout(() => {
+                        firstRow.style.backgroundColor = "#ffcccc";
+                    }, 500);
+                }
+            }
         };
 
         // Initial load

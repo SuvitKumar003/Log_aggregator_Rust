@@ -1,0 +1,8 @@
+[server]
+host = "127.0.0.1"
+port = 8080
+
+[logging]
+file_path = "logs.json"
+max_memory_logs = 50000
+persist_interval_secs = 5
