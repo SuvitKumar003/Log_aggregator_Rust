@@ -3,7 +3,9 @@ use actix_files::NamedFile;
 use serde::{Serialize, Deserialize};
 use chrono::Utc;
 use std::sync::{Arc, Mutex};
-use futures::stream::Stream;
+use tokio::sync::broadcast;
+use futures::StreamExt;
+use bytes::Bytes;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct LogEntry {
@@ -15,6 +17,7 @@ struct LogEntry {
 
 // Shared in-memory storage
 type LogDb = Arc<Mutex<Vec<LogEntry>>>;
+type Broadcaster = Arc<broadcast::Sender<String>>;
 
 // POST /logs
 async fn post_log(
@@ -34,8 +37,9 @@ async fn post_log(
         db_lock.push(entry.clone());
 
         // Optional: keep memory bounded
-        if db_lock.len() > 50_000 {
-            db_lock.drain(0..(db_lock.len() - 50_000));
+        let len = db_lock.len();
+        if len > 50_000 {
+            db_lock.drain(0..(len - 50_000));
         }
     }
 
@@ -96,7 +100,7 @@ async fn logs_stream(bcast: web::Data<Broadcaster>) -> HttpResponse {
         match rx.recv().await {
             Ok(msg) => {
                 let sse_frame = format!("data: {}\n\n", msg);
-                Some((Ok::<Bytes, Error>(Bytes::from(sse_frame)), rx))
+                Some((Ok::<Bytes, actix_web::Error>(Bytes::from(sse_frame)), rx))
             }
             Err(_) => None,
         }
@@ -111,15 +115,22 @@ async fn logs_stream(bcast: web::Data<Broadcaster>) -> HttpResponse {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let db: LogDb = Arc::new(Mutex::new(Vec::new()));
+
+    // Create broadcaster for SSE
+    let (tx, _rx) = broadcast::channel::<String>(100);
+    let broadcaster: Broadcaster = Arc::new(tx);
+
     println!("Server running at http://127.0.0.1:8080/");
 
     HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db.clone()))
+            .app_data(web::Data::new(broadcaster.clone()))
             .route("/", web::get().to(index))
             .route("/logs", web::post().to(post_log))
             .route("/logs", web::get().to(get_logs))
             .route("/logs/stats", web::get().to(get_stats))
+            .route("/logs/stream", web::get().to(logs_stream))
     })
     .bind(("127.0.0.1", 8080))?
     .run()

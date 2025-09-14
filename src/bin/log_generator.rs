@@ -1,44 +1,47 @@
+use reqwest::Client;
+use serde::Serialize;
+use chrono::Utc;
 use rand::Rng;
-use reqwest::blocking::Client;
-use serde_json::json;
-use std::{thread, time::Duration};
+use std::time::Duration;
+use tokio::time::sleep;
 
-fn main() {
-    // Create HTTP client
+#[derive(Debug, Serialize)]
+struct LogEntry {
+    timestamp: String,
+    service: String,
+    level: String,
+    message: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new();
 
-    let services = ["auth", "payments", "orders", "inventory", "shipping"];
-    let levels = ["INFO", "WARN", "ERROR"];
+    let services = vec!["auth", "payment", "inventory", "analytics"];
+    let levels = vec!["INFO", "WARN", "ERROR", "DEBUG"];
 
-    for i in 1..=50 {
-        let mut rng = rand::thread_rng();
+    for i in 0..10 {
+        let service = services[rand::thread_rng().gen_range(0..services.len())].to_string();
+        let level = levels[rand::thread_rng().gen_range(0..levels.len())].to_string();
 
-        let service = services[rng.gen_range(0..services.len())];
-        let level = levels[rng.gen_range(0..levels.len())];
-        let message = format!("Random log message {}", rng.gen_range(1..1000));
+        let log = LogEntry {
+            timestamp: Utc::now().to_rfc3339(),
+            service: service.clone(),
+            level: level.clone(),
+            message: format!("Log message {} from {}", i, service),
+        };
 
-        // Create JSON payload
-        let payload = json!({
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-            "service": service,
-            "level": level,
-            "message": message
-        });
-
-        // POST to the server
-        let response = client
+        let res = client
             .post("http://127.0.0.1:8080/logs")
-            .json(&payload)
-            .send();
+            .json(&log)
+            .send()
+            .await?;
 
-        match response {
-            Ok(resp) => println!("Posted log: {} {} -> {}", service, level, resp.status()),
-            Err(err) => println!("Error posting log: {}", err),
-        }
+        println!("Sent log {} [{} - {}], response: {}", i, service, level, res.status());
 
-        // Wait 200ms between logs
-        thread::sleep(Duration::from_millis(200));
+        // ✅ NEW: slow down so logs appear one by one
+        sleep(Duration::from_secs(2)).await;
     }
 
-    println!("✅ Finished posting logs");
+    Ok(())
 }
